@@ -18,13 +18,27 @@ import androidx.compose.ui.draw.clip
 fun CartScreen(
     vm: CartViewModel,
     token: String?,
+    onPayPalApprovalRequested: (String) -> Unit,
     onBack: () -> Unit
 ) {
     val items by vm.items.collectAsState()
     val loading by vm.loading.collectAsState()
     val message by vm.message.collectAsState()
     val saleId by vm.saleId.collectAsState()
+    val payPalState by vm.payPalState.collectAsState()
     var selectedPaymentMethod by remember { mutableStateOf("MOBILE_MANUAL") }
+    val payPalBusy = payPalState is PayPalCheckoutState.CreatingOrder ||
+        payPalState is PayPalCheckoutState.AwaitingApproval ||
+        payPalState is PayPalCheckoutState.Capturing
+    val checkoutBusy = loading || payPalBusy
+
+    LaunchedEffect(payPalState) {
+        val state = payPalState
+        if (state is PayPalCheckoutState.AwaitingApproval && !state.approvalStarted) {
+            vm.markPayPalApprovalStarted()
+            onPayPalApprovalRequested(state.paypalOrderId)
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -56,6 +70,37 @@ fun CartScreen(
                 )
             }
 
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        when (val state = payPalState) {
+            PayPalCheckoutState.Idle -> Unit
+            PayPalCheckoutState.CreatingOrder ->
+                Text("Creando orden en PayPal Sandbox…")
+            is PayPalCheckoutState.AwaitingApproval ->
+                Text("Esperando aprobación en PayPal…")
+            PayPalCheckoutState.Capturing ->
+                Text("Aprobación recibida. Confirmando el pago…")
+            is PayPalCheckoutState.Success -> {
+                Text(
+                    text = state.message,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text("Nº de pedido: ${state.saleId}")
+            }
+            is PayPalCheckoutState.Error ->
+                Text(
+                    text = state.message,
+                    color = MaterialTheme.colorScheme.error
+                )
+            PayPalCheckoutState.Canceled ->
+                Text(
+                    text = "Pago cancelado. El carrito se ha conservado.",
+                    color = MaterialTheme.colorScheme.error
+                )
+        }
+
+        if (payPalState !is PayPalCheckoutState.Idle) {
             Spacer(modifier = Modifier.height(12.dp))
         }
 
@@ -103,7 +148,8 @@ fun CartScreen(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 RadioButton(
                     selected = selectedPaymentMethod == "MOBILE_MANUAL",
-                    onClick = { selectedPaymentMethod = "MOBILE_MANUAL" }
+                    onClick = { selectedPaymentMethod = "MOBILE_MANUAL" },
+                    enabled = !checkoutBusy
                 )
                 Text("Pago pendiente")
             }
@@ -111,9 +157,10 @@ fun CartScreen(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 RadioButton(
                     selected = selectedPaymentMethod == "PAYPAL",
-                    onClick = { selectedPaymentMethod = "PAYPAL" }
+                    onClick = { selectedPaymentMethod = "PAYPAL" },
+                    enabled = !checkoutBusy
                 )
-                Text("PayPal Sandbox (pedido pendiente)")
+                Text("PayPal Sandbox")
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -135,14 +182,22 @@ fun CartScreen(
             Button(
                 onClick = {
                     token?.let {
-                        vm.confirmOrder(it, selectedPaymentMethod)
+                        if (selectedPaymentMethod == "PAYPAL") {
+                            vm.createPayPalOrder(it)
+                        } else {
+                            vm.confirmManualOrder(it)
+                        }
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = !loading && items.isNotEmpty() && token != null
+                enabled = !checkoutBusy && items.isNotEmpty() && token != null
             ) {
                 Text(
-                    if (loading) "Confirmando..." else "Confirmar pedido"
+                    when (payPalState) {
+                        PayPalCheckoutState.CreatingOrder -> "Creando orden…"
+                        PayPalCheckoutState.Capturing -> "Confirmando pago…"
+                        else -> if (loading) "Confirmando…" else "Confirmar pedido"
+                    }
                 )
             }
 

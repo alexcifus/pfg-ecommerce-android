@@ -1,8 +1,10 @@
 package com.example.myapplication
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -27,13 +29,29 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
+import com.paypal.android.corepayments.CoreConfig
+import com.paypal.android.corepayments.Environment
+import com.paypal.android.paypalwebpayments.PayPalPresentAuthChallengeResult
+import com.paypal.android.paypalwebpayments.PayPalWebCheckoutClient
+import com.paypal.android.paypalwebpayments.PayPalWebCheckoutFinishStartResult
+import com.paypal.android.paypalwebpayments.PayPalWebCheckoutFundingSource
+import com.paypal.android.paypalwebpayments.PayPalWebCheckoutRequest
 
 
 
 class MainActivity : ComponentActivity() {
 
+    private val cartViewModel: CartViewModel by viewModels()
+    private var payPalWebCheckoutClient: PayPalWebCheckoutClient? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        configurePayPal()
+        savedInstanceState?.getString(PAYPAL_CLIENT_STATE)?.let {
+            payPalWebCheckoutClient?.restore(it)
+        }
+        handlePayPalReturn(intent)
+
         setContent {
 
             MyApplicationTheme {
@@ -41,8 +59,6 @@ class MainActivity : ComponentActivity() {
                 // ViewModels compartidos
                 val authVM: AuthViewModel = viewModel()
                 val productVM: ProductViewModel = viewModel()
-                val cartVM: CartViewModel = viewModel()
-
                 val user by authVM.user.collectAsState()
 
                 if (user == null) {
@@ -50,12 +66,81 @@ class MainActivity : ComponentActivity() {
                 } else {
                     ProductListScreen(
                         productVM = productVM,
-                        cartVM = cartVM,
-                        token = authVM.token
+                        cartVM = cartViewModel,
+                        token = authVM.token,
+                        onPayPalApprovalRequested = ::startPayPalApproval
                     )
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handlePayPalReturn(intent)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        payPalWebCheckoutClient?.instanceState?.let {
+            outState.putString(PAYPAL_CLIENT_STATE, it)
+        }
+        super.onSaveInstanceState(outState)
+    }
+
+    private fun configurePayPal() {
+        if (BuildConfig.PAYPAL_CLIENT_ID.isBlank()) {
+            return
+        }
+
+        val coreConfig = CoreConfig(
+            clientId = BuildConfig.PAYPAL_CLIENT_ID,
+            environment = Environment.SANDBOX
+        )
+        payPalWebCheckoutClient = PayPalWebCheckoutClient(
+            this,
+            coreConfig,
+            PAYPAL_RETURN_URL_SCHEME
+        )
+    }
+
+    private fun startPayPalApproval(paypalOrderId: String) {
+        val client = payPalWebCheckoutClient
+        if (client == null) {
+            cartViewModel.onPayPalApprovalFailed(
+                "Configura PAYPAL_CLIENT_ID en local.properties"
+            )
+            return
+        }
+
+        val request = PayPalWebCheckoutRequest(
+            orderId = paypalOrderId,
+            fundingSource = PayPalWebCheckoutFundingSource.PAYPAL
+        )
+        client.start(this, request) { result ->
+            if (result is PayPalPresentAuthChallengeResult.Failure) {
+                cartViewModel.onPayPalApprovalFailed(result.error.errorDescription)
+            }
+        }
+    }
+
+    private fun handlePayPalReturn(intent: Intent) {
+        val client = payPalWebCheckoutClient ?: return
+
+        when (val result = client.finishStart(intent)) {
+            is PayPalWebCheckoutFinishStartResult.Success ->
+                cartViewModel.capturePayPalOrder()
+            is PayPalWebCheckoutFinishStartResult.Canceled ->
+                cartViewModel.onPayPalCanceled()
+            is PayPalWebCheckoutFinishStartResult.Failure ->
+                cartViewModel.onPayPalApprovalFailed(result.error.errorDescription)
+            PayPalWebCheckoutFinishStartResult.NoResult, null -> Unit
+        }
+    }
+
+    companion object {
+        private const val PAYPAL_CLIENT_STATE = "paypal_client_state"
+        private const val PAYPAL_RETURN_URL_SCHEME = "com.example.myapplication.paypal"
     }
 }
 
@@ -131,7 +216,8 @@ fun LoginScreen(vm: AuthViewModel) {
 fun ProductListScreen(
     productVM: ProductViewModel,
     cartVM: CartViewModel,
-    token: String?
+    token: String?,
+    onPayPalApprovalRequested: (String) -> Unit
 ) {
     val loading by productVM.loading.collectAsState()
     val error by productVM.error.collectAsState()
@@ -156,6 +242,7 @@ fun ProductListScreen(
                     CartScreen(
                         vm = cartVM,
                         token = token,
+                        onPayPalApprovalRequested = onPayPalApprovalRequested,
                         onBack = {
                             showCart = false
                         }
