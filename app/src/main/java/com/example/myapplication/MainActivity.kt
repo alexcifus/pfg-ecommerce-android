@@ -18,7 +18,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import com.example.myapplication.R
 import com.example.myapplication.model.EcommerceProduct
+import com.example.myapplication.network.ImageUrlNormalizer
 import com.example.myapplication.ui.auth.AuthViewModel
 import com.example.myapplication.ui.cart.CartScreen
 import com.example.myapplication.ui.cart.CartViewModel
@@ -313,8 +315,6 @@ fun ProductItemRow(
     product: EcommerceProduct,
     onClick: () -> Unit
 ) {
-    val img = product.imagen.replace("127.0.0.1", "10.0.2.2")
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -322,8 +322,10 @@ fun ProductItemRow(
             .padding(8.dp)
     ) {
         AsyncImage(
-            model = fixImageUrl(product.imagen),
+            model = ImageUrlNormalizer.normalize(product.imagen),
             contentDescription = product.title,
+            placeholder = androidx.compose.ui.res.painterResource(R.drawable.ic_product_placeholder),
+            error = androidx.compose.ui.res.painterResource(R.drawable.ic_product_placeholder),
             modifier = Modifier.size(80.dp)
         )
 
@@ -346,8 +348,6 @@ fun ProductDetailScreen(
     onBack: () -> Unit,
     onAddToCart: () -> Unit
 ) {
-    val img = product.imagen.replace("127.0.0.1", "10.0.2.2")
-
     val context = LocalContext.current
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
@@ -361,8 +361,10 @@ fun ProductDetailScreen(
         Spacer(Modifier.height(12.dp))
 
         AsyncImage(
-            model = fixImageUrl(product.imagen),
+            model = ImageUrlNormalizer.normalize(product.imagen),
             contentDescription = product.title,
+            placeholder = androidx.compose.ui.res.painterResource(R.drawable.ic_product_placeholder),
+            error = androidx.compose.ui.res.painterResource(R.drawable.ic_product_placeholder),
             modifier = Modifier
                 .fillMaxWidth()
                 .height(220.dp)
@@ -391,13 +393,4 @@ fun ProductDetailScreen(
         }
     }
 
-}
-fun fixImageUrl(url: String?): String {
-    if (url.isNullOrBlank()) return ""
-
-    return url
-        .replace("http://127.0.0.1:8000", "http://10.0.2.2:8000")
-        .replace("http://localhost:8000", "http://10.0.2.2:8000")
-        .replace("127.0.0.1", "10.0.2.2")
-        .replace("localhost", "10.0.2.2")
 }

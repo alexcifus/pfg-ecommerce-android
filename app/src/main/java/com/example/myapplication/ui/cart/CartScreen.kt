@@ -8,6 +8,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.example.myapplication.R
+import com.example.myapplication.network.ImageUrlNormalizer
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Alignment
@@ -227,11 +229,11 @@ fun CartItemRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
 
-        val img = cartItem.product.imagen.replace("127.0.0.1", "10.0.2.2")
-
         AsyncImage(
-            model = fixImageUrl(cartItem.product.imagen),
+            model = ImageUrlNormalizer.normalize(cartItem.product.imagen),
             contentDescription = cartItem.product.title,
+            placeholder = androidx.compose.ui.res.painterResource(R.drawable.ic_product_placeholder),
+            error = androidx.compose.ui.res.painterResource(R.drawable.ic_product_placeholder),
             modifier = Modifier
                 .size(70.dp)
                 .clip(RoundedCornerShape(8.dp)),
@@ -268,13 +270,4 @@ fun CartItemRow(
             Text("X")
         }
     }
-}
-fun fixImageUrl(url: String?): String {
-    if (url.isNullOrBlank()) return ""
-
-    return url
-        .replace("http://127.0.0.1:8000", "http://10.0.2.2:8000")
-        .replace("http://localhost:8000", "http://10.0.2.2:8000")
-        .replace("127.0.0.1", "10.0.2.2")
-        .replace("localhost", "10.0.2.2")
 }
