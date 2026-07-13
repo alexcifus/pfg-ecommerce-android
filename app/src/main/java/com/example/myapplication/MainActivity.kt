@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -223,7 +225,8 @@ fun ProductListScreen(
 ) {
     val loading by productVM.loading.collectAsState()
     val error by productVM.error.collectAsState()
-    val products by productVM.products.collectAsState()
+    val searchQuery by productVM.searchQuery.collectAsState()
+    val products by productVM.filteredProducts.collectAsState()
 
     // Estados de navegación internos
     var selectedProduct by remember { mutableStateOf<EcommerceProduct?>(null) }
@@ -262,8 +265,36 @@ fun ProductListScreen(
 
                 else -> {
                     // Lista de productos
-                    Column(Modifier.padding(16.dp)) {
+                    Column(Modifier.fillMaxSize().padding(16.dp)) {
                         Text("Productos", style = MaterialTheme.typography.headlineMedium)
+                        Spacer(Modifier.height(16.dp))
+
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = productVM::onSearchQueryChange,
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Buscar productos") },
+                            singleLine = true,
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.Search,
+                                    contentDescription = "Buscar"
+                                )
+                            },
+                            trailingIcon = {
+                                if (searchQuery.isNotEmpty()) {
+                                    IconButton(
+                                        onClick = { productVM.onSearchQueryChange("") }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Clear,
+                                            contentDescription = "Limpiar búsqueda"
+                                        )
+                                    }
+                                }
+                            }
+                        )
+
                         Spacer(Modifier.height(16.dp))
 
                         if (loading) {
@@ -277,12 +308,23 @@ fun ProductListScreen(
                             )
                         }
 
-                        LazyColumn {
-                            items(products) { product ->
-                                ProductItemRow(
-                                    product = product,
-                                    onClick = { selectedProduct = product }
-                                )
+                        if (!loading && error == null && searchQuery.isNotBlank() && products.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("No se encontraron productos")
+                            }
+                        } else {
+                            LazyColumn(modifier = Modifier.weight(1f)) {
+                                items(products) { product ->
+                                    ProductItemRow(
+                                        product = product,
+                                        onClick = { selectedProduct = product }
+                                    )
+                                }
                             }
                         }
                     }
