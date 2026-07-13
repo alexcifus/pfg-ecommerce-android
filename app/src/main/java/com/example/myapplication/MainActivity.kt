@@ -5,6 +5,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -15,7 +17,9 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -40,6 +44,8 @@ import com.paypal.android.paypalwebpayments.PayPalWebCheckoutClient
 import com.paypal.android.paypalwebpayments.PayPalWebCheckoutFinishStartResult
 import com.paypal.android.paypalwebpayments.PayPalWebCheckoutFundingSource
 import com.paypal.android.paypalwebpayments.PayPalWebCheckoutRequest
+import androidx.compose.ui.res.painterResource
+import kotlinx.coroutines.delay
 
 
 
@@ -64,8 +70,18 @@ class MainActivity : ComponentActivity() {
                 val authVM: AuthViewModel = viewModel()
                 val productVM: ProductViewModel = viewModel()
                 val user by authVM.user.collectAsState()
+                var showWelcome by rememberSaveable {
+                    mutableStateOf(true)
+                }
 
-                if (user == null) {
+                LaunchedEffect(Unit) {
+                    delay(1200)
+                    showWelcome = false
+                }
+
+                if (showWelcome) {
+                    JazzItWelcomeScreen()
+                } else if (user == null) {
                     LoginScreen(vm = authVM)
                 } else {
                     ProductListScreen(
@@ -151,6 +167,23 @@ class MainActivity : ComponentActivity() {
 ////////////////////////////////////////////////////////////////////////////////////
 // LOGIN SCREEN
 ////////////////////////////////////////////////////////////////////////////////////
+
+@Composable
+fun JazzItWelcomeScreen() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+        contentAlignment = Alignment.Center
+    ) {
+        Image(
+            painter = painterResource(id = R.drawable.jazzit_logo),
+            contentDescription = "JazzIt",
+            modifier = Modifier.width(190.dp),
+            contentScale = ContentScale.Fit
+        )
+    }
+}
 
 @Composable
 fun LoginScreen(vm: AuthViewModel) {
