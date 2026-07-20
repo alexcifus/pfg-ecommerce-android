@@ -12,12 +12,13 @@ import com.example.myapplication.network.ApiClient
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
 
 data class CartItem(
     val product: EcommerceProduct,
-    var quantity: Int
+    val quantity: Int
 )
 
 sealed interface PayPalCheckoutState {
@@ -58,16 +59,21 @@ class CartViewModel : ViewModel() {
     private var currentPayPalOrderId: String? = null
 
     fun addToCart(product: EcommerceProduct) {
-        val current = _items.value.toMutableList()
-        val index = current.indexOfFirst { it.product.id == product.id }
+        _items.update { current ->
+            val index = current.indexOfFirst { it.product.id == product.id }
 
-        if (index >= 0) {
-            current[index].quantity++
-        } else {
-            current.add(CartItem(product, 1))
+            if (index >= 0) {
+                current.mapIndexed { itemIndex, item ->
+                    if (itemIndex == index) {
+                        item.copy(quantity = item.quantity + 1)
+                    } else {
+                        item
+                    }
+                }
+            } else {
+                current + CartItem(product, 1)
+            }
         }
-
-        _items.value = current
     }
 
     fun removeItem(productId: Int) {
@@ -75,27 +81,41 @@ class CartViewModel : ViewModel() {
     }
 
     fun increaseQuantity(productId: Int) {
-        val current = _items.value.toMutableList()
-        current.find { it.product.id == productId }?.let {
-            it.quantity++
-            _items.value = current
+        _items.update { current ->
+            current.map { item ->
+                if (item.product.id == productId) {
+                    item.copy(quantity = item.quantity + 1)
+                } else {
+                    item
+                }
+            }
         }
     }
 
     fun decreaseQuantity(productId: Int) {
-        val current = _items.value.toMutableList()
-        current.find { it.product.id == productId }?.let {
-            it.quantity--
-            if (it.quantity <= 0) {
-                current.remove(it)
+        _items.update { current ->
+            current.mapNotNull { item ->
+                if (item.product.id == productId) {
+                    val nextQuantity = item.quantity - 1
+                    if (nextQuantity > 0) {
+                        item.copy(quantity = nextQuantity)
+                    } else {
+                        null
+                    }
+                } else {
+                    item
+                }
             }
-            _items.value = current
         }
     }
 
     fun totalPrice(): Int {
-        return _items.value.sumOf {
-            (it.product.priceEur ?: 0) * it.quantity
+        return calculateTotal(_items.value)
+    }
+
+    private fun calculateTotal(items: List<CartItem>): Int {
+        return items.sumOf {
+            it.product.priceEur * it.quantity
         }
     }
 
@@ -110,15 +130,16 @@ class CartViewModel : ViewModel() {
             _message.value = null
 
             try {
+                val currentItems = _items.value
                 val request = CheckoutRequest(
-                    items = _items.value.map {
+                    items = currentItems.map {
                         CheckoutItemRequest(
                             product_id = it.product.id,
                             quantity = it.quantity,
-                            price = (it.product.priceEur ?: 0).toDouble()
+                            price = it.product.priceEur.toDouble()
                         )
                     },
-                    total = totalPrice().toDouble(),
+                    total = calculateTotal(currentItems).toDouble(),
                     method_payment = "MOBILE_MANUAL"
                 )
 
