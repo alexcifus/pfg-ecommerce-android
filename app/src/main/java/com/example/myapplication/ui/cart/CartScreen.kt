@@ -153,7 +153,7 @@ fun CartScreen(
                     onClick = { selectedPaymentMethod = "MOBILE_MANUAL" },
                     enabled = !checkoutBusy
                 )
-                Text("Pago pendiente")
+                Text("Pago en tienda")
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
