@@ -10,6 +10,9 @@ import com.example.myapplication.model.MobilePayPalItemRequest
 import com.example.myapplication.model.MobilePayPalOrderRequest
 import com.example.myapplication.network.ApiClient
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -57,6 +60,20 @@ class CartViewModel : ViewModel() {
 
     private var payPalToken: String? = null
     private var currentPayPalOrderId: String? = null
+
+    private var sessionVersion = 0L
+
+    fun clearCart() {
+        sessionVersion++
+        viewModelScope.coroutineContext.cancelChildren()
+        _items.value = emptyList()
+        _loading.value = false
+        _message.value = null
+        _saleId.value = null
+        _payPalState.value = PayPalCheckoutState.Idle
+        payPalToken = null
+        currentPayPalOrderId = null
+    }
 
     fun addToCart(product: EcommerceProduct) {
         _items.update { current ->
@@ -125,6 +142,7 @@ class CartViewModel : ViewModel() {
             return
         }
 
+        val version = sessionVersion
         viewModelScope.launch {
             _loading.value = true
             _message.value = null
@@ -148,6 +166,9 @@ class CartViewModel : ViewModel() {
                     body = request
                 )
 
+                coroutineContext.ensureActive()
+                if (version != sessionVersion) return@launch
+
                 if (response.message == 200) {
                     _items.value = emptyList()
                     _message.value = response.message_text
@@ -156,7 +177,10 @@ class CartViewModel : ViewModel() {
                     _message.value = "No se pudo realizar el pedido"
                     _saleId.value = null
                 }
+            } catch (exception: CancellationException) {
+                throw exception
             } catch (exception: HttpException) {
+                if (version != sessionVersion) return@launch
                 val errorBody = exception.response()?.errorBody()?.string()
                 Log.e(
                     MANUAL_CHECKOUT_TAG,
@@ -167,6 +191,8 @@ class CartViewModel : ViewModel() {
                     "Error HTTP ${exception.code()} al confirmar el pedido. Revisa Logcat."
                 _saleId.value = null
             } catch (exception: Exception) {
+                if (exception is CancellationException) throw exception
+                if (version != sessionVersion) return@launch
                 Log.e(
                     MANUAL_CHECKOUT_TAG,
                     "Respuesta no válida de /api/mobile/checkout: ${exception.message}",
@@ -176,7 +202,7 @@ class CartViewModel : ViewModel() {
                     "Respuesta no válida del servidor. Revisa Logcat ($MANUAL_CHECKOUT_TAG)."
                 _saleId.value = null
             } finally {
-                _loading.value = false
+                if (version == sessionVersion) _loading.value = false
             }
         }
     }
@@ -187,6 +213,7 @@ class CartViewModel : ViewModel() {
             return
         }
 
+        val version = sessionVersion
         viewModelScope.launch {
             _payPalState.value = PayPalCheckoutState.CreatingOrder
             _message.value = null
@@ -208,6 +235,9 @@ class CartViewModel : ViewModel() {
                     body = request
                 )
 
+                coroutineContext.ensureActive()
+                if (version != sessionVersion) return@launch
+
                 if (response.message != 200 || response.paypal_order_id.isBlank()) {
                     _payPalState.value = PayPalCheckoutState.Error(
                         "Laravel no devolvió una orden PayPal válida."
@@ -222,6 +252,8 @@ class CartViewModel : ViewModel() {
                     paypalOrderId = response.paypal_order_id
                 )
             } catch (exception: Exception) {
+                if (exception is CancellationException) throw exception
+                if (version != sessionVersion) return@launch
                 _payPalState.value = PayPalCheckoutState.Error(
                     "No se pudo crear la orden PayPal: " +
                         (exception.message ?: "error desconocido")
@@ -238,6 +270,7 @@ class CartViewModel : ViewModel() {
     }
 
     fun capturePayPalOrder() {
+        if (_payPalState.value !is PayPalCheckoutState.AwaitingApproval) return
         val token = payPalToken
         val paypalOrderId = currentPayPalOrderId
 
@@ -248,6 +281,7 @@ class CartViewModel : ViewModel() {
             return
         }
 
+        val version = sessionVersion
         viewModelScope.launch {
             _payPalState.value = PayPalCheckoutState.Capturing
 
@@ -256,6 +290,9 @@ class CartViewModel : ViewModel() {
                     token = "Bearer $token",
                     paypalOrderId = paypalOrderId
                 )
+
+                coroutineContext.ensureActive()
+                if (version != sessionVersion) return@launch
 
                 if (response.message == 200 && response.status.equals("paid", ignoreCase = true)) {
                     _items.value = emptyList()
@@ -272,6 +309,8 @@ class CartViewModel : ViewModel() {
                     )
                 }
             } catch (exception: Exception) {
+                if (exception is CancellationException) throw exception
+                if (version != sessionVersion) return@launch
                 _payPalState.value = PayPalCheckoutState.Error(
                     "No se pudo capturar el pago: " +
                         (exception.message ?: "error desconocido") +
@@ -282,12 +321,14 @@ class CartViewModel : ViewModel() {
     }
 
     fun onPayPalCanceled() {
+        if (_payPalState.value !is PayPalCheckoutState.AwaitingApproval) return
         _payPalState.value = PayPalCheckoutState.Canceled
         payPalToken = null
         currentPayPalOrderId = null
     }
 
     fun onPayPalApprovalFailed(detail: String?) {
+        if (_payPalState.value !is PayPalCheckoutState.AwaitingApproval) return
         val suffix = detail?.takeIf { it.isNotBlank() }?.let { ": $it" }.orEmpty()
         _payPalState.value = PayPalCheckoutState.Error(
             "PayPal no pudo completar la aprobación$suffix. El carrito se ha conservado."

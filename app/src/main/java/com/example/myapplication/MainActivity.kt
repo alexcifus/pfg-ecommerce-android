@@ -2,17 +2,21 @@ package com.example.myapplication
 
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.*
@@ -24,6 +28,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import coil.imageLoader
 import com.example.myapplication.R
 import com.example.myapplication.model.EcommerceProduct
 import com.example.myapplication.network.ImageUrlNormalizer
@@ -88,7 +93,14 @@ class MainActivity : ComponentActivity() {
                         productVM = productVM,
                         cartVM = cartViewModel,
                         token = authVM.token,
-                        onPayPalApprovalRequested = ::startPayPalApproval
+                        onPayPalApprovalRequested = ::startPayPalApproval,
+                        onLogout = {
+                            cartViewModel.clearCart()
+                            authVM.logout()
+                            // Discard approval state belonging to the previous session.
+                            payPalWebCheckoutClient = null
+                            configurePayPal()
+                        }
                     )
                 }
             }
@@ -138,7 +150,7 @@ class MainActivity : ComponentActivity() {
             fundingSource = PayPalWebCheckoutFundingSource.PAYPAL
         )
         client.start(this, request) { result ->
-            if (result is PayPalPresentAuthChallengeResult.Failure) {
+            if (client === payPalWebCheckoutClient && result is PayPalPresentAuthChallengeResult.Failure) {
                 cartViewModel.onPayPalApprovalFailed(result.error.errorDescription)
             }
         }
@@ -192,7 +204,7 @@ fun LoginScreen(vm: AuthViewModel) {
     val error by vm.error.collectAsState()
     val user by vm.user.collectAsState()
 
-    var email by remember { mutableStateOf("alexcifu@gmail.com") }
+    var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
 
     Surface(Modifier.fillMaxSize()) {
@@ -254,7 +266,8 @@ fun ProductListScreen(
     productVM: ProductViewModel,
     cartVM: CartViewModel,
     token: String?,
-    onPayPalApprovalRequested: (String) -> Unit
+    onPayPalApprovalRequested: (String) -> Unit,
+    onLogout: () -> Unit
 ) {
     val loading by productVM.loading.collectAsState()
     val error by productVM.error.collectAsState()
@@ -299,7 +312,19 @@ fun ProductListScreen(
                 else -> {
                     // Lista de productos
                     Column(Modifier.fillMaxSize().padding(16.dp)) {
-                        Text("Productos", style = MaterialTheme.typography.headlineMedium)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Productos", style = MaterialTheme.typography.headlineMedium)
+                            IconButton(onClick = onLogout) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ExitToApp,
+                                    contentDescription = "Cerrar sesión"
+                                )
+                            }
+                        }
                         Spacer(Modifier.height(16.dp))
 
                         OutlinedTextField(
@@ -398,6 +423,24 @@ fun ProductItemRow(
     ) {
         AsyncImage(
             model = ImageUrlNormalizer.normalize(product.imagen),
+            imageLoader = LocalContext.current.imageLoader,
+            onError = { state ->
+                if (BuildConfig.DEBUG) {
+                    Log.e(
+                        "ProductImages",
+                        "list error url=${ImageUrlNormalizer.normalize(product.imagen)}",
+                        state.result.throwable
+                    )
+                }
+            },
+            onSuccess = { state ->
+                if (BuildConfig.DEBUG) {
+                    Log.d(
+                        "ProductImages",
+                        "list success url=${ImageUrlNormalizer.normalize(product.imagen)} source=${state.result.dataSource}"
+                    )
+                }
+            },
             contentDescription = product.title,
             placeholder = androidx.compose.ui.res.painterResource(R.drawable.ic_product_placeholder),
             error = androidx.compose.ui.res.painterResource(R.drawable.ic_product_placeholder),
@@ -425,7 +468,12 @@ fun ProductDetailScreen(
 ) {
     val context = LocalContext.current
 
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 88.dp)
+    ) {
 
         Text(
             "← Volver",
@@ -437,6 +485,24 @@ fun ProductDetailScreen(
 
         AsyncImage(
             model = ImageUrlNormalizer.normalize(product.imagen),
+            imageLoader = LocalContext.current.imageLoader,
+            onError = { state ->
+                if (BuildConfig.DEBUG) {
+                    Log.e(
+                        "ProductImages",
+                        "detail error url=${ImageUrlNormalizer.normalize(product.imagen)}",
+                        state.result.throwable
+                    )
+                }
+            },
+            onSuccess = { state ->
+                if (BuildConfig.DEBUG) {
+                    Log.d(
+                        "ProductImages",
+                        "detail success url=${ImageUrlNormalizer.normalize(product.imagen)} source=${state.result.dataSource}"
+                    )
+                }
+            },
             contentDescription = product.title,
             placeholder = androidx.compose.ui.res.painterResource(R.drawable.ic_product_placeholder),
             error = androidx.compose.ui.res.painterResource(R.drawable.ic_product_placeholder),
@@ -448,6 +514,13 @@ fun ProductDetailScreen(
         Spacer(Modifier.height(16.dp))
 
         Text(product.title, style = MaterialTheme.typography.titleLarge)
+        if (!product.resumen.isNullOrBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = product.resumen,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
         Spacer(Modifier.height(8.dp))
         Text("Precio: ${product.priceEur} €")
 
